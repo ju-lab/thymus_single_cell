@@ -1,0 +1,323 @@
+---
+title: "Thymus Single Cell Data Spike-in Normaliza"
+output: html_notebook
+editor_options: 
+  chunk_output_type: console
+---
+
+Thymus single cell data from [Brennecke et al (nat immunol, 2015)](https://www.nature.com/articles/ni.3246) was downloaded, and aligned by
+STAR (2-pass protocol). Read counts for each gene were collected into a matrix
+`~team_projects/thymus_single_cell/Brennnecke_2015/count_matrix.tsv` which has
+cells in each columns and genes (including spike-in) in each rows. The count
+matrix will examined and normalized as described in [Brennecke et al (natmeth, 2013)](https://www.nature.com/articles/nmeth.2645) and [bioconductor tutorial](http://bioconductor.org/help/workflows/simpleSingleCell/)
+
+
+# Quality control on the cells
+
+Based on Aron's tutorial, low-quality cells need to be removed to ensure
+downstreem analysis not to be effected by technical effects.
+
+* library size (total read) > certain point
+* number of non-zero transcripts > certain point
+  (library capturing diverse transcript population)
+* proportion of reads mapped to spike in ~ library size
+  (high spike in proportion = RNA poor cell)
+* high mitochontrial transcript proportion = poor integrity cell
+
+```{r}
+suppressMessages(library(tidyverse))
+library(stringr)
+count_matrix <- read_tsv("count_matrix.tsv", progress = F)
+head(count_matrix[ , 1:7])
+tail(count_matrix[ , 1:7])
+
+count_gene <- count_matrix %>% filter(grepl("ENSMUSG", Sample))
+names_gene <- count_gene$Sample
+count_gene <- select(count_gene, -Sample)
+count_ercc <- count_matrix %>% filter(grepl("ERCC", Sample))
+names_ercc <- count_ercc$Sample
+count_ercc <- select(count_ercc, -Sample)
+
+mito_gene_id <- system(intern = T, "sed '/^MT/! d;
+                       s/.*gene_id .\\([^\"]*\\).*/\\1/' ~/ref/gencode.vM16.gtf|
+                       sort | uniq")
+
+# biomart annotation
+biomart <- read_tsv("biomart_mm2hs.tsv", col_names = c("mmID", "hgID", "name"),
+                    skip = 1)
+
+QC_summary <- count_matrix %>% 
+  slice(1:4) %>%
+  select(-Sample) %>%
+  data.table::transpose() %>%
+  {colnames(.) <- count_matrix$Sample[1:4]; .} %>%
+  mutate(N_uniq_mapped = colSums(count_gene) + colSums(count_ercc),
+         N_sum = N_uniq_mapped + N_multimapping + N_noFeature + 
+           N_ambiguous + N_unmapped,
+         uniq_rate = N_uniq_mapped / N_sum,
+         cell = colnames(count_matrix)[2:ncol(count_matrix)],
+         mito_gene_count = colSums(count_gene[names_gene %in% mito_gene_id, ]),
+         all_gene_count = colSums(count_gene),
+         all_ercc_count = colSums(count_ercc),
+         library_size = all_gene_count + all_ercc_count,
+         non_zero_transcript = colSums(count_gene > 0),
+         ercc_proportion = all_ercc_count / library_size,
+         mito_proportion = mito_gene_count / all_gene_count)
+
+# correlation between factors
+with(QC_summary, {
+  par(mfrow = c(4, 4))
+  hist(library_size, breaks = 30, col = "grey", freq = T, main = "Library sizes")
+  legend("topright", legend = table(library_size > 1900000),
+         pch = c(4, 1), bty = "n")
+  abline(v = 1900000, col = "red")
+  plot(non_zero_transcript, library_size)
+  abline(h = 1900000, col = "red")
+  abline(v = 4900, col = "darkgreen")
+  plot(ercc_proportion, library_size)
+  abline(h = 1900000, col = "red")
+  abline(v = 0.6, col = "blue")
+  plot(mito_proportion, library_size)
+  abline(h = 1900000, col = "red")
+  abline(v = 0.3, col = "darkgrey")
+  
+  plot(library_size, non_zero_transcript)
+  abline(v = 1900000, col = "red")
+  abline(h = 4900, col = "darkgreen")
+  hist(non_zero_transcript, breaks = 30, col = "grey", freq = T, 
+       main = "Non-zero transcript counts")
+  legend("topright", legend = table(non_zero_transcript > 4900),
+         pch = c(4, 1), bty = "n")
+  abline(v = 4900, col = "darkgreen")
+  plot(ercc_proportion, non_zero_transcript)
+  abline(h = 4900, col = "darkgreen")
+  abline(v = 0.6, col = "blue")
+  legend("topright", 
+         legend = table(non_zero_transcript > 4900 & ercc_proportion < 0.6),
+         pch = c(4, 1), bty = "n")
+  plot(mito_proportion, non_zero_transcript)
+  abline(h = 4900, col = "darkgreen")
+  abline(v = 0.3, col = "darkgrey")
+  
+  plot(library_size, ercc_proportion)
+  abline(v = 1900000, col = "red")
+  abline(h = 0.6, col = "blue")
+  plot(non_zero_transcript, ercc_proportion)
+  abline(v = 4900, col = "darkgreen")
+  abline(h = 0.6, col = "blue")
+  hist(ercc_proportion, breaks = 30, col = "grey", freq = T,
+       main = "ERCC read proportion")
+  legend("topright", legend = table(ercc_proportion < 0.6),
+         pch = c(4, 1), bty = "n")
+  abline(v = 0.6, col = "blue")
+  plot(mito_proportion, ercc_proportion)
+  abline(v = 0.3, col = "darkgrey")
+  abline(h = 0.6, col = "blue")
+  
+  plot(library_size, mito_proportion)
+  abline(v = 1900000, col = "red")
+  abline(h = 0.3, col = "darkgrey")
+  plot(non_zero_transcript, mito_proportion)
+  abline(v = 4900, col = "darkgreen")
+  abline(h = 0.3, col = "darkgrey")
+  plot(ercc_proportion, mito_proportion)
+  abline(v = 0.6, col = "blue")
+  abline(h = 0.3, col = "darkgrey")
+  hist(mito_proportion, breaks = 30, col = "grey", freq = T,
+       main = "Mitochondrial transcript proportion")
+  legend("topright", legend = table(mito_proportion < 0.3),
+         pch = c(4,1), bty = "n")
+  abline(v = 0.3, col = "darkgrey")
+  par(mfrow = c(1, 1))
+})
+
+qc_pass <- filter(QC_summary, library_size > 1900000,
+                  non_zero_transcript > 4900,
+                  ercc_proportion < 0.6,
+                  mito_proportion < 0.3)$cell
+# 251/298 passed
+count_gene.pass <- count_gene %>% select(qc_pass)
+count_ercc.pass <- count_ercc %>% select(qc_pass)
+```
+`r length(qc_pas)` cells passed my QC filter, by four criteria.
+
+
+
+# Classification of Cell cycle phase
+
+As [Scialdone et al, 2015](https://www.sciencedirect.com/science/article/pii/S1046202315300098?via%3Dihub) found, heterogenous composition of cell cycle may distort downstream analysis. Thymic epithelial cells are not actively dividing cells, as I know, I will check that is their any other than G1 phase cells and exclude them. I will use pre-trained data set from scran package, however, I will predict my data without cyclone function of sce package, as I do not want to generate SingleCellExperiment object.
+
+```{r}
+# deferred
+# https://github.com/PMBio/cyclone/blob/master/R/pairs_method/demo/pairs_demo.R
+```
+
+# Examining gene-level expression metrics in raw count form
+
+Examining top raw sequences: 
+
+* too much spike-in => poor library
+* abscence of ribosomal proteins => poor alignment??
+* Presence of pseudogenes => poor alignment(?) 
+* top  50 genes may account for about 20% of total read count
+
+```{r}
+names_gene.2 <- str_extract(names_gene, "[^.]*")
+translated_names <- data.frame(mmID = names_gene.2) %>%
+  left_join(biomart) %>% {
+    aggregate(.[,2:3], list(.[,1]),
+          function(x) paste0(unique(x), collapse = ","))
+  } %>% 
+  {left_join(data.frame(Group.1 = names_gene.2), .)} %>%
+  rename(mmID=Group.1)
+translated_names$name[translated_names$name == "NA"] <-
+  translated_names$mmID[translated_names$name == "NA"]
+trans <- translated_names$name
+names(trans) <-translated_names$mmID 
+
+dat <- bind_rows(mutate(count_ercc.pass, feature = names_ercc),
+                 mutate(count_gene.pass, feature = trans[names_gene.2]))
+dat$median <- rowSums(dplyr::select(dat, -feature))
+dat.top <- dat %>% arrange(desc(median)) %>%
+  dplyr::slice(1:50)
+explained <- sum(dplyr::select(dat.top, -feature)) / sum(dplyr::select(dat, -feature))
+
+dat.top %>% gather(-median, -feature, key = "cell", value = "count") %>%
+ggplot(aes(y = count, x = reorder(feature, median))) + 
+  geom_boxplot() +
+  coord_flip() +
+  ggtitle(paste0("Top 50 account for ", explained*100, "% of total"))
+# remove except trans
+rm(dat, names_gene.2, translated_names, dat.top, explained)
+```
+Overall, ERCC spike-in reads were too much amoung top features of single cell transcriptome. HLA class II (CD74, HLA-DQ..), HLA-I (B2M, HLA-A,B,C..), Mitochondrial genes are seen. Overall, the result has too high ERCC spike-in concentration.
+
+# Removal of low count genes
+```{r}
+# remove all-zero genes
+max_exp <- apply(count_gene.pass, 1, function(x) max(x))
+near_max_exp <- apply(count_gene.pass, 1, function(x) quantile(x, 0.99))
+sum(max_exp == 0) # 15686
+sum(near_max_exp == 0) # 23529
+
+number_of_expressing_cells <- rowSums(count_gene.pass > 0)
+weired <- near_max_exp == 0 & max_exp != 0
+plot(max_exp[weired], number_of_expressing_cells[weired], ylim = c(1,8), col = "#00000030", pch = 20)
+for (i in 1:7) lines(density(max_exp[number_of_expressing_cells == i], 2) %>% {.$y = .$y * 30 + i;.})
+
+median_exp <- apply(count_gene.pass, 1, median)
+hist(log10(median_exp), breaks = 50, col = "grey80")
+abline(v = log10(6), col = "red")
+max_exp <- apply(count_gene.pass, 1, function(x) quantile(x, 0.99))
+plot(log10(max_exp), log10(median_exp), col = "#00000030")
+abline(h = log10(1:6), col = rainbow(6))
+abline(v = log10(1:6), col = rainbow(6))
+
+number_of_expressing_cells <- rowSums(count_gene.pass > 0)
+plot(log10(median_exp + 1), number_of_expressing_cells, col = "#00000030")
+
+mycolor <- c("#00000030","red")[(max_exp != 0 & near_max_exp == 0) + 1]
+plot(log10(max_exp + 1), number_of_expressing_cells, col = mycolor)
+abline(v=log10((0:5) + 1))
+Hmisc::cut2(max_exp, 1:6) %>% table %>% .[1:6] %>% 
+{paste("<=", stringr::str_trim(names(.)), cumsum(.))} %>%
+  legend("topright", legend = ., title = "genes with low read count",
+         bty = "n")
+abline(h = 0:5 * 10)
+Hmisc::cut2(number_of_expressing_cells, 1:5 * 10) %>% table %>% .[1:5] %>% 
+{paste("<=", 1:5 * 10, cumsum(.))} %>%
+  legend("right", legend = ., title = "genes from rare cells",
+         bty = "n")
+legend("topleft", pch = 1, col ="red", legend = "99% cells don't express this gene")
+
+count_gene[weired, ] %>% apply(1, which.max) %>% colnames(count_gene)[.] %>%
+  data.frame(cell = ., gene = names_gene[weired],
+             count = count_gene[weired, ] %>% apply(1, max)) %>%
+  arrange(-count) %>% slice(900:1000)
+
+count_gene[weired, ] %>% apply(1, max) %>% {log10(. + 1)} %>% hist(breaks= 30)
+
+gene.pass <- max_exp > 2
+count_gene.pass2 <- count_gene.pass[gene.pass, ]
+names_gene.pass <- names_gene[gene.pass]
+trans.pass <- trans[gene.pass]
+```
+
+## Brenecke (DeSEQ) method (size factor)
+
+for each gene i, calculate geometric mean, km
+then use the median ratio of sample's counts to these means as size
+factor sj = median_i(kij/kM) (sample j = 1...m, gene i = 1..i)
+
+```{r}
+calculate_size_factor2 <- function (k) {
+  km <- apply(k, 1, function(x) {exp(mean(log(x)))}) 
+  apply((k / km), 2, function(x) {median(x, na.rm = T)})
+}
+
+calculate_size_factor <- function (k) {
+  km <- apply(k, 1, function(x) {K <- x[x>0]; exp(mean(log(K)))}) 
+  apply((k / km), 2, function(x) {K <- x[x>0]; median(K, na.rm = T)})
+}
+
+km1 <- apply(count_ercc.pass, 1, function(x) exp(mean(log(x))))
+apply(count_ercc.pass/km1, 2, median)
+
+
+st <- calculate_size_factor(count_ercc.pass)
+sb <- calculate_size_factor(count_gene.pass2)
+s <- calculate_size_factor(bind_rows(count_gene.pass2, count_ercc.pass))
+
+par(mfrow = c(2, 3))
+plot(QC_summary$library_size[qc_pass], s)
+plot(QC_summary$library_size[qc_pass], st)
+plot(QC_summary$library_size[qc_pass], sb)
+plot(QC_summary$all_ercc_count[qc_pass], st)
+plot(QC_summary$all_gene_count[qc_pass], sb)
+plot(st, sb)
+par(mfrow = c(1, 1))
+count_ercc.norm <- t(t(count_ercc.pass) / st) %>% as.data.frame %>% tbl_df
+count_gene.norm <- t(t(count_gene.pass2) / sb) %>% as.data.frame %>% tbl_df
+
+spike_in_concentration <- read_tsv("mm10/spike_in_concentration.txt")
+colnames(spike_in_concentration) <- c("ERCC_ID", "concentration")
+# 1:250000 dilution of Mix 1 (attomoles/ul)
+
+par(mfrow = c(1, 2))
+tmp <- count_ercc.pass %>% mutate(ERCC_ID = names_ercc) %>%
+  left_join(spike_in_concentration) %>%
+  select(ERCC_ID, concentration, everything()) %>%
+  gather(-ERCC_ID, -concentration, 
+         key = "Cell", value = "raw_ERCC_count") %>%
+  left_join(data.frame(Cell = colnames(count_ercc.pass), size_factor = st))
+tmp %>% with(plot(log10(concentration), log10(raw_ERCC_count),
+                  col = "#00000030"))
+
+tmp <- count_ercc.norm %>% mutate(ERCC_ID = names_ercc) %>%
+  left_join(spike_in_concentration) %>%
+  select(ERCC_ID, concentration, everything()) %>%
+  gather(-ERCC_ID, -concentration, 
+         key = "Cell", value = "normalized_ERCC_count") %>%
+  left_join(data.frame(Cell = colnames(count_ercc.norm), size_factor = st))
+tmp %>% with(plot(log10(concentration), log10(normalized_ERCC_count),
+                  col = "#00000030"))
+tmp2 <- data.frame(
+  cvsquared = apply(count_ercc.norm, 1, 
+                    function(x) (sd(x, na.rm = T) / mean(x, na.rm = T))^2),
+  avexp = apply(count_ercc.norm, 1, function(x) mean(x, na.rm = T))
+)
+plot(log10(tmp2$avexp), log10(tmp2$cvsquared))
+tmp3 <- data.frame(
+  cvsquared = apply(count_gene.norm, 1, 
+                    function(x) (sd(x, na.rm = T) / mean(x, na.rm = T))^2),
+  avexp = apply(count_gene.norm, 1, function(x) mean(x, na.rm = T))
+)
+plot(log10(tmp3$avexp), log10(tmp3$cvsquared), col = "#00000030")
+
+```
+
+
+
+```{r}
+
+```
