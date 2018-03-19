@@ -278,46 +278,95 @@ plot(st, sb)
 par(mfrow = c(1, 1))
 count_ercc.norm <- t(t(count_ercc.pass) / st) %>% as.data.frame %>% tbl_df
 count_gene.norm <- t(t(count_gene.pass2) / sb) %>% as.data.frame %>% tbl_df
+par(mfrow = c(1, 1))
 
 spike_in_concentration <- read_tsv("mm10/spike_in_concentration.txt")
 colnames(spike_in_concentration) <- c("ERCC_ID", "concentration")
 # 1:250000 dilution of Mix 1 (attomoles/ul)
+```
 
-par(mfrow = c(1, 2))
-tmp <- count_ercc.pass %>% mutate(ERCC_ID = names_ercc) %>%
-  left_join(spike_in_concentration) %>%
-  select(ERCC_ID, concentration, everything()) %>%
-  gather(-ERCC_ID, -concentration, 
-         key = "Cell", value = "raw_ERCC_count") %>%
-  left_join(data.frame(Cell = colnames(count_ercc.pass), size_factor = st))
-tmp %>% with(plot(log10(concentration), log10(raw_ERCC_count),
-                  col = "#00000030"))
+# unsupervised clustering
 
-tmp <- count_ercc.norm %>% mutate(ERCC_ID = names_ercc) %>%
-  left_join(spike_in_concentration) %>%
-  select(ERCC_ID, concentration, everything()) %>%
-  gather(-ERCC_ID, -concentration, 
-         key = "Cell", value = "normalized_ERCC_count") %>%
-  left_join(data.frame(Cell = colnames(count_ercc.norm), size_factor = st))
-tmp %>% with(plot(log10(concentration), log10(normalized_ERCC_count),
-                  col = "#00000030"))
-tmp2 <- data.frame(
-  cvsquared = apply(count_ercc.norm, 1, 
-                    function(x) (sd(x, na.rm = T) / mean(x, na.rm = T))^2),
-  avexp = apply(count_ercc.norm, 1, function(x) mean(x, na.rm = T))
-)
-plot(log10(tmp2$avexp), log10(tmp2$cvsquared))
-tmp3 <- data.frame(
-  cvsquared = apply(count_gene.norm, 1, 
-                    function(x) (sd(x, na.rm = T) / mean(x, na.rm = T))^2),
-  avexp = apply(count_gene.norm, 1, function(x) mean(x, na.rm = T))
-)
-plot(log10(tmp3$avexp), log10(tmp3$cvsquared), col = "#00000030")
+```{r}
+library(Rtsne)
+tsne_out <- Rtsne(t(unique(count_gene.norm)))
 
+tsne_out$Y %>% dim
+
+STAR_Expression <- unlist(count_gene.norm[which(trans.pass == "STAR"), ])
+
+summary(STAR_Expression)
+table(STAR_Expression == 0)
+log10(STAR_Expression+1)
+plot(tsne_out$Y)
+tmp <- data.frame(tsne_1 = tsne_out$Y[,1], tsne_2 =  tsne_out$Y[,2])
+tmp$color <- log10(STAR_Expression + 1)
+tmp %>%
+ggplot(aes(x = tsne_1, y = tsne_2, color = color)) + geom_point()
+which(trans == "STAR")
+goi1 <- c("FAT2", "CDH3", "PIR")
+goi2 <- c("IRS4", "PPARGC1A", "IRX4", "KLK8")
+tmp$STAR <- log10(unlist(count_gene.norm[which(trans.pass %in% "STAR"), ])+1)
+
+tmp$FAT2 <- log10(unlist(count_gene.norm[which(trans.pass %in% goi1[1]), ])+1)
+tmp$CDH3 <- log10(unlist(count_gene.norm[which(trans.pass %in% goi1[2]), ])+1)
+tmp$PIR <- log10(unlist(count_gene.norm[which(trans.pass %in% goi1[3]), ])+1)
+
+
+tmp$IRS4 <- log10(unlist(count_gene.norm[which(trans.pass %in% goi2[1]), ])+1)
+tmp$PPARGC1A <- log10(unlist(count_gene.norm[which(trans.pass %in% goi2[2]), ])+1)
+tmp$IRX4 <- log10(unlist(count_gene.norm[which(trans.pass %in% goi2[3]), ])+1)
+tmp$KLK8 <- log10(unlist(count_gene.norm[which(trans.pass %in% goi2[4]), ])+1)
+
+pdf(file = "tmp.pdf")
+ggplot(tmp, aes(x = tsne_1, y = tsne_2, color = STAR)) + geom_point() + ggtitle("STAR")
+
+ggplot(tmp, aes(x = tsne_1, y = tsne_2, color = FAT2)) + geom_point() + ggtitle("FAT2")
+ggplot(tmp, aes(x = tsne_1, y = tsne_2, color = CDH3)) + geom_point() + ggtitle("CDH3")
+ggplot(tmp, aes(x = tsne_1, y = tsne_2, color = PIR)) + geom_point() + ggtitle("PIR")
+
+ggplot(tmp, aes(x = tsne_1, y = tsne_2, color = IRS4)) + geom_point() + ggtitle("IRS4")
+ggplot(tmp, aes(x = tsne_1, y = tsne_2, color = PPARGC1A)) + geom_point() + ggtitle("PPARGC1A")
+ggplot(tmp, aes(x = tsne_1, y = tsne_2, color = IRX4)) + geom_point() + ggtitle("IRX4")
+ggplot(tmp, aes(x = tsne_1, y = tsne_2, color = KLK8)) + geom_point() + ggtitle("KLK8")
+
+
+dev.off()
+
+table(tmp$STAR > 1, tmp$tsne_2 > 1.25) %>% fisher.test
+
+count_gene.norm[which(trans.pass == "IRS4"), ] %>% unlist %>% sort(decreasing = T )
+count_gene.norm[which(trans.pass == "IRX4"), ] %>% unlist %>% sort(decreasing = T )
+plot(tmp$STAR, tmp$IRX4)
+
+plot(tmp$PPARGC1A, tmp$IRX4)
+
+table(tmp$STAR>0, tmp$IRX4>0) %>% fisher.test
+table(tmp$PPARGC1A>0, tmp$IRX4>0) %>% fisher.test
+
+(matrix(c(216,14,19,2), ncol = 2) * 10) %>% fisher.test
+
+
+tmp2 <- tmp
+tmp2 %>% dim
+tmp2$tsne_1 <- NULL
+tmp2$tsne_2 <- NULL
+tmp2$color<- NULL
+tmp2 %>% as.matrix %>% unique %>% Rtsne() -> tmp.tsne
+plot(tmp.tsne$Y)
+
+
+
+image(tmp2)
+heatmap(as.matrix(tmp2))
+heatmap(t(tmp2))
+tmp2 %>% View
+library(heatmap3)
+heatmap3(as.matrix(tmp2))
 ```
 
 
-
 ```{r}
+count_gene.norm
 
 ```
