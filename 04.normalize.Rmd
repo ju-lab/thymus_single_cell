@@ -32,11 +32,11 @@ head(count_matrix[ , 1:7])
 tail(count_matrix[ , 1:7])
 
 count_gene <- count_matrix %>% filter(grepl("ENSMUSG", Sample))
-names_gene <- count_gene$Sample
-count_gene <- select(count_gene, -Sample)
+# names_gene <- count_gene$Sample
+# count_gene <- select(count_gene, -Sample)
 count_ercc <- count_matrix %>% filter(grepl("ERCC", Sample))
-names_ercc <- count_ercc$Sample
-count_ercc <- select(count_ercc, -Sample)
+# names_ercc <- count_ercc$Sample
+# count_ercc <- select(count_ercc, -Sample)
 
 mito_gene_id <- system(intern = T, "sed '/^MT/! d;
                        s/.*gene_id .\\([^\"]*\\).*/\\1/' ~/ref/gencode.vM16.gtf|
@@ -239,7 +239,6 @@ count_gene[weired, ] %>% apply(1, max) %>% {log10(. + 1)} %>% hist(breaks= 30)
 
 gene.pass <- max_exp > 2
 count_gene.pass2 <- count_gene.pass[gene.pass, ]
-names_gene.pass <- names_gene[gene.pass]
 trans.pass <- trans[gene.pass]
 ```
 
@@ -289,84 +288,6 @@ colnames(spike_in_concentration) <- c("ERCC_ID", "concentration")
 
 ```{r}
 library(Rtsne)
-tsne_out <- Rtsne(t(unique(count_gene.norm)))
-
-tsne_out$Y %>% dim
-
-STAR_Expression <- unlist(count_gene.norm[which(trans.pass == "STAR"), ])
-
-summary(STAR_Expression)
-table(STAR_Expression == 0)
-log10(STAR_Expression+1)
-plot(tsne_out$Y)
-tmp <- data.frame(tsne_1 = tsne_out$Y[,1], tsne_2 =  tsne_out$Y[,2])
-tmp$color <- log10(STAR_Expression + 1)
-tmp %>%
-ggplot(aes(x = tsne_1, y = tsne_2, color = color)) + geom_point()
-which(trans == "STAR")
-goi1 <- c("FAT2", "CDH3", "PIR")
-goi2 <- c("IRS4", "PPARGC1A", "IRX4", "KLK8")
-tmp$STAR <- log10(unlist(count_gene.norm[which(trans.pass %in% "STAR"), ])+1)
-
-tmp$FAT2 <- log10(unlist(count_gene.norm[which(trans.pass %in% goi1[1]), ])+1)
-tmp$CDH3 <- log10(unlist(count_gene.norm[which(trans.pass %in% goi1[2]), ])+1)
-tmp$PIR <- log10(unlist(count_gene.norm[which(trans.pass %in% goi1[3]), ])+1)
-
-
-tmp$IRS4 <- log10(unlist(count_gene.norm[which(trans.pass %in% goi2[1]), ])+1)
-tmp$PPARGC1A <- log10(unlist(count_gene.norm[which(trans.pass %in% goi2[2]), ])+1)
-tmp$IRX4 <- log10(unlist(count_gene.norm[which(trans.pass %in% goi2[3]), ])+1)
-tmp$KLK8 <- log10(unlist(count_gene.norm[which(trans.pass %in% goi2[4]), ])+1)
-
-pdf(file = "tmp.pdf")
-ggplot(tmp, aes(x = tsne_1, y = tsne_2, color = STAR)) + geom_point() + ggtitle("STAR")
-
-ggplot(tmp, aes(x = tsne_1, y = tsne_2, color = FAT2)) + geom_point() + ggtitle("FAT2")
-ggplot(tmp, aes(x = tsne_1, y = tsne_2, color = CDH3)) + geom_point() + ggtitle("CDH3")
-ggplot(tmp, aes(x = tsne_1, y = tsne_2, color = PIR)) + geom_point() + ggtitle("PIR")
-
-ggplot(tmp, aes(x = tsne_1, y = tsne_2, color = IRS4)) + geom_point() + ggtitle("IRS4")
-ggplot(tmp, aes(x = tsne_1, y = tsne_2, color = PPARGC1A)) + geom_point() + ggtitle("PPARGC1A")
-ggplot(tmp, aes(x = tsne_1, y = tsne_2, color = IRX4)) + geom_point() + ggtitle("IRX4")
-ggplot(tmp, aes(x = tsne_1, y = tsne_2, color = KLK8)) + geom_point() + ggtitle("KLK8")
-
-
-dev.off()
-
-table(tmp$STAR > 1, tmp$tsne_2 > 1.25) %>% fisher.test
-
-count_gene.norm[which(trans.pass == "IRS4"), ] %>% unlist %>% sort(decreasing = T )
-count_gene.norm[which(trans.pass == "IRX4"), ] %>% unlist %>% sort(decreasing = T )
-plot(tmp$STAR, tmp$IRX4)
-
-plot(tmp$PPARGC1A, tmp$IRX4)
-
-table(tmp$STAR>0, tmp$IRX4>0) %>% fisher.test
-table(tmp$PPARGC1A>0, tmp$IRX4>0) %>% fisher.test
-
-(matrix(c(216,14,19,2), ncol = 2) * 10) %>% fisher.test
-
-
-tmp2 <- tmp
-tmp2 %>% dim
-tmp2$tsne_1 <- NULL
-tmp2$tsne_2 <- NULL
-tmp2$color<- NULL
-tmp2 %>% as.matrix %>% unique %>% Rtsne() -> tmp.tsne
-plot(tmp.tsne$Y)
-
-
-
-image(tmp2)
-heatmap(as.matrix(tmp2))
-heatmap(t(tmp2))
-tmp2 %>% View
-library(heatmap3)
-heatmap3(as.matrix(tmp2))
-```
-
-
-```{r}
-count_gene.norm
+# tsne_out <- Rtsne(t(unique(count_gene.norm)))
 
 ```
